@@ -1,0 +1,7 @@
+editor:
+  config:
+    # Specify a path
+    contentsCss: 'EXT:trix/Resources/Public/Css/contents.css'
+    autofocus: true
+    heading1:
+      tagName: h3

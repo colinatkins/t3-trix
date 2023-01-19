@@ -1,0 +1,11 @@
+trix-editor, trix-toolbar .trix-button-group {
+    background: #fff;
+}
+
+trix-editor {
+    font-size: calc(1.2em + 0.15vw);
+}
+
+trix-editor a, trix-editor a:visited, trix-editor a:hover {
+    color: #038930;
+}

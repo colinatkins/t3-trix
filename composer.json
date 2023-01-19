@@ -1,0 +1,42 @@
+{
+  "name": "atkins/t3-trix",
+  "type": "typo3-cms-framework",
+  "description": "A Trix Rich Text Editor Integration for TYPO3 CMS",
+  "homepage": "https://github.com/colinatkins/t3-trix",
+  "license": [
+    "GPL-2.0-or-later"
+  ],
+  "authors": [
+    {
+      "name": "Colin Atkins",
+      "email": "atkins@hey.com",
+      "role": "Developer"
+    }
+  ],
+  "config": {
+    "sort-packages": true
+  },
+  "require": {
+    "typo3/cms-core": "12.0.*@dev"
+  },
+  "conflict": {
+    "typo3/cms": "*",
+    "typo3/cms-rte-ckeditor": "*"
+  },
+  "suggest": {
+    "typo3/cms-setup": "*"
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "12.0.x-dev"
+    },
+    "typo3/cms": {
+      "extension-key": "trix"
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "Atkins\\Trix\\": "Classes/"
+    }
+  }
+}

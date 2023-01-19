@@ -1,0 +1,12 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+    public: false
+
+  Atkins\Trix\:
+    resource: '../Classes/*'
+
+  Atkins\Trix\Controller\BrowseLinksController:
+    shared: false
+    public: true
