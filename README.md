@@ -15,7 +15,7 @@ composer remove typo3/cms-rte-ckeditor
 Run the following command to install Trix Editor for TYPO3:
 
 ```bash
-composer require atkins/trix
+composer require atkins/t3-trix
 ```
 
 ## Compatibility
