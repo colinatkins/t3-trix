@@ -17,8 +17,8 @@
     "sort-packages": true
   },
   "require": {
-    "php" : "~7.2 || ~7.4 || ~8.0 || ~8.1 || ~8.2",
-    "typo3/cms-core" : "10.* || 11.* || 12.*"
+    "php" : "~7.4 || ~8.0 || ~8.1 || ~8.2",
+    "typo3/cms-core" : "11.*"
   },
   "conflict": {
     "typo3/cms": "*",
@@ -30,9 +30,6 @@
   "extra": {
     "typo3/cms": {
       "extension-key": "trix"
-    },
-    "branch-alias": {
-      "dev-master": "1.0.x-dev"
     }
   },
   "autoload": {
