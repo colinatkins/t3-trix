@@ -1,7 +1,6 @@
-import Trix from "@typo3/trix.esm.min.js";
+import Trix from 'trix';
 const { lang } = Trix.config;
-import { Application, Controller } from "@typo3/stimulus.js";
-import { default as modalObject } from "@typo3/backend/modal.js";
+import { Application, Controller } from "stimulus";
 window.Stimulus = Application.start()
 
 Stimulus.register("trix", class extends Controller {
@@ -76,7 +75,7 @@ Stimulus.register("trix", class extends Controller {
     }
 
     makeUrlFromModulePath(url, additionalParams) {
-        return url + (-1 === url.indexOf("?") ? "?" : "&") + "&contentsLanguage=en&editorId=123" + (additionalParams || "")
+        return url + (-1 === url.indexOf("?") ? "?" : "&") + `&contentsLanguage=en&editorId=${this.editorTarget.getAttribute('input')}` + (additionalParams || "")
     }
 
     recordAction() {
@@ -91,13 +90,14 @@ Stimulus.register("trix", class extends Controller {
         } else {
             this.activateButton(this.linkbuttonTarget)
             let modalTitle = 'Link Browser'
-            modalObject.advanced({
-                type: modalObject.types.iframe,
+            window.TrixBridge.modal.advanced({
+                type: window.TrixBridge.modal.types.iframe,
                 title: modalTitle,
                 content: this.makeUrlFromModulePath(this.linkBrowserUrlValue, ''),
-                size: modalObject.sizes.large,
+                size: window.TrixBridge.modal.sizes.large,
                 callback: t => {
-                    t.userData.trix = this;
+                    //t.userData.trix = this;
+                    t.data('trix', this);
                 }
             })
         }

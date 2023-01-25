@@ -22,11 +22,11 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use TYPO3\CMS\Backend\Form\Element\AbstractFormElement;
 use TYPO3\CMS\Backend\Form\NodeFactory;
 use TYPO3\CMS\Backend\Routing\UriBuilder;
+use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Localization\Locales;
 use TYPO3\CMS\Core\Page\JavaScriptModuleInstruction;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Core\Utility\PathUtility;
-use TYPO3\CMS\RteCKEditor\Controller\ResourceController;
 
 /**
  * Render rich text editor in FormEngine
@@ -84,6 +84,8 @@ class RichTextElement extends AbstractFormElement
     /**
      * Container objects give $nodeFactory down to other containers.
      *
+     * @param NodeFactory $nodeFactory
+     * @param array $data
      * @param EventDispatcherInterface|null $eventDispatcher
      */
     public function __construct(NodeFactory $nodeFactory, array $data, EventDispatcherInterface $eventDispatcher = null)
@@ -95,6 +97,7 @@ class RichTextElement extends AbstractFormElement
     /**
      * Renders the ckeditor element
      *
+     * @return array
      * @throws \InvalidArgumentException
      */
     public function render(): array
@@ -120,19 +123,18 @@ class RichTextElement extends AbstractFormElement
         $fieldWizardHtml = $fieldWizardResult['html'];
         $resultArray = $this->mergeChildReturnIntoExistingResult($resultArray, $fieldWizardResult, false);
 
-        $this->rteConfiguration = $config['richtextConfiguration']['editor'] ?? [];
 
         $editorId = $fieldId . 'trix';
 
         $trixControllerAttributes = GeneralUtility::implodeAttributes([
             'data-controller' => 'trix',
-            'data-trix-link-browser-url-value' => $this->getLinkBrowserRoute(),
+            'data-trix-link-browser-url-value' => $this->getLinkBrowserRoute($editorId),
             'data-trix-heading-tagname-value' => $this->headingTagName()
         ], true);
 
         $hiddenTagAttributes = GeneralUtility::implodeAttributes([
             'type' => 'hidden',
-            'name' => $itemFormElementName,
+            'name' => htmlspecialchars($itemFormElementName),
             'id' => $editorId,
             'value' => $value
         ], true);
@@ -171,10 +173,17 @@ class RichTextElement extends AbstractFormElement
         $html[] =   '</div>';
         $html[] = '</div>';
 
+        $html[] = $this->getEs6ImportMap();
+        $html[] = $this->getEs6ControllerModule();
+
         $resultArray['html'] = implode(LF, $html);
-        $resultArray['javaScriptModules'][] = JavaScriptModuleInstruction::create('@typo3/trix/trix.js');
+
+        $this->rteConfiguration = $config['richtextConfiguration']['editor'] ?? [];
+
         $resultArray['stylesheetFiles'][] = PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Contrib/trix.css');
         $resultArray['stylesheetFiles'][] = PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Css/editor.css');
+
+        $resultArray['requireJsModules'][] = JavaScriptModuleInstruction::forRequireJS('TYPO3/CMS/Trix/TrixBridge', 'TrixBridge');
 
         $styleSrc = (string)($trixEditorConfiguration['options']['contentsCss'] ?? '');
         if ($styleSrc !== '') {
@@ -182,6 +191,21 @@ class RichTextElement extends AbstractFormElement
         }
 
         return $resultArray;
+    }
+
+    private function getEs6ImportMap() {
+        return '<script type="importmap">' . json_encode([
+            'imports' => [
+                'trix' => PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Contrib/trix.esm.js'),
+                'stimulus' => PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Contrib/stimulus.js')
+            ]
+        ]) . '</script>';
+    }
+
+    private function getEs6ControllerModule() {
+        return '<script type="module">'.file_get_contents(
+                \TYPO3\CMS\Core\Utility\GeneralUtility::getFileAbsFileName('EXT:trix/Resources/Public/JavaScript/trix.js')
+        ).'</script>';
     }
 
     private function hasAutofocus(): bool {
@@ -194,6 +218,8 @@ class RichTextElement extends AbstractFormElement
 
     /**
      * Determine the contents language iso code
+     *
+     * @return string
      */
     protected function getLanguageIsoCodeOfContent(): string
     {
@@ -209,7 +235,7 @@ class RichTextElement extends AbstractFormElement
             $contentLanguage = $this->rteConfiguration['config']['defaultContentLanguage'] ?? 'en_US';
         }
         $languageCodeParts = explode('_', $contentLanguage);
-        $contentLanguage = '_' . strtoupper($languageCodeParts[1]);
+        $contentLanguage = strtolower($languageCodeParts[0]) . (!empty($languageCodeParts[1]) ? '_' . strtoupper($languageCodeParts[1]) : '');
         // Find the configured language in the list of localization locales
         $locales = GeneralUtility::makeInstance(Locales::class);
         // If not found, default to 'en'
@@ -220,34 +246,45 @@ class RichTextElement extends AbstractFormElement
     }
 
     /**
-     * Determine the language direction
+     * Gets the JavaScript code for CKEditor module
+     * Compiles the configuration, and then adds plugins
+     *
+     * @param string $fieldId
+     * @return JavaScriptModuleInstruction
      */
-    protected function getLanguageDirectionOfContent(): string
-    {
-        $currentLanguageUid = ($this->data['databaseRow']['sys_language_uid'] ?? 0);
-        if (is_array($currentLanguageUid)) {
-            $currentLanguageUid = $currentLanguageUid[0];
-        }
-        $contentLanguageUid = (int)max($currentLanguageUid, 0);
-        return $this->data['systemLanguageRows'][$contentLanguageUid]['direction'] ?? '';
-    }
-
-    /**
-     * @return array{options: array, externalPlugins: array}
-     */
-    protected function resolveTrixEditorConfiguration(): array
+    protected function loadTrixEditorRequireJsModule(string $fieldId): JavaScriptModuleInstruction
     {
         $configuration = $this->prepareConfigurationForEditor();
 
-        return [
-            'options' => $configuration
-        ];
+        $externalPlugins = [];
+        foreach ($this->getExtraPlugins() as $extraPluginName => $extraPluginConfig) {
+            $configName = $extraPluginConfig['configName'] ?? $extraPluginName;
+            if (!empty($extraPluginConfig['config']) && is_array($extraPluginConfig['config'])) {
+                if (empty($configuration[$configName])) {
+                    $configuration[$configName] = $extraPluginConfig['config'];
+                } elseif (is_array($configuration[$configName])) {
+                    $configuration[$configName] = array_replace_recursive($extraPluginConfig['config'], $configuration[$configName]);
+                }
+            }
+            $configuration['extraPlugins'] = ($configuration['extraPlugins'] ?? '') . ',' . $extraPluginName;
+            if (isset($this->data['parameterArray']['fieldConf']['config']['placeholder'])) {
+                $configuration['editorplaceholder'] = (string)$this->data['parameterArray']['fieldConf']['config']['placeholder'];
+            }
+
+            $externalPlugins[] = [
+                'name' => $extraPluginName,
+                'resource' => $extraPluginConfig['resource'],
+            ];
+        }
+
+        // Make a hash of the configuration and append it to CKEDITOR.timestamp
+        // This will mitigate browser caching issue when plugins are updated
+        $configurationHash = md5((string)json_encode($configuration));
+        return JavaScriptModuleInstruction::forRequireJS('Atkins/Trix/TrixInitializer', 'TrixInitializer');
     }
 
-
-
     /**
-     * Get configuration of external/additional plugins
+     * Get route to link browser
      */
     protected function getLinkBrowserRoute(): string
     {
@@ -268,14 +305,29 @@ class RichTextElement extends AbstractFormElement
     }
 
     /**
+     * @return array{options: array, externalPlugins: array}
+     */
+    protected function resolveTrixEditorConfiguration(): array
+    {
+        $configuration = $this->prepareConfigurationForEditor();
+
+        return [
+            'options' => $configuration
+        ];
+    }
+
+    /**
      * Add configuration to replace LLL: references with the translated value
+     * @param array $configuration
+     *
+     * @return array
      */
     protected function replaceLanguageFileReferences(array $configuration): array
     {
         foreach ($configuration as $key => $value) {
             if (is_array($value)) {
                 $configuration[$key] = $this->replaceLanguageFileReferences($value);
-            } elseif (is_string($value)) {
+            } elseif (is_string($value) && stripos($value, 'LLL:') === 0) {
                 $configuration[$key] = $this->getLanguageService()->sL($value);
             }
         }
@@ -284,6 +336,9 @@ class RichTextElement extends AbstractFormElement
 
     /**
      * Add configuration to replace absolute EXT: paths with relative ones
+     * @param array $configuration
+     *
+     * @return array
      */
     protected function replaceAbsolutePathsToRelativeResourcesPath(array $configuration): array
     {
@@ -299,6 +354,9 @@ class RichTextElement extends AbstractFormElement
 
     /**
      * Resolves an EXT: syntax file to an absolute web URL
+     *
+     * @param string $value
+     * @return string
      */
     protected function resolveUrlPath(string $value): string
     {
@@ -323,6 +381,10 @@ class RichTextElement extends AbstractFormElement
             $configuration['readOnly'] = true;
         }
 
+        if (is_array($this->rteConfiguration['config'] ?? null)) {
+            $configuration = array_replace_recursive($configuration, $this->rteConfiguration['config']);
+        }
+
         $configuration['language']['content'] = $this->getLanguageIsoCodeOfContent();
 
         // Replace all label references
@@ -333,9 +395,21 @@ class RichTextElement extends AbstractFormElement
         return $configuration;
     }
 
+    /**
+     * @param string $itemFormElementName
+     * @return string
+     */
     protected function sanitizeFieldId(string $itemFormElementName): string
     {
         $fieldId = (string)preg_replace('/[^a-zA-Z0-9_:.-]/', '_', $itemFormElementName);
         return htmlspecialchars((string)preg_replace('/^[^a-zA-Z]/', 'x', $fieldId));
+    }
+
+    /**
+     * @return BackendUserAuthentication
+     */
+    protected function getBackendUser()
+    {
+        return $GLOBALS['BE_USER'];
     }
 }
