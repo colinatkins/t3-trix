@@ -1,6 +1,6 @@
 {
   "name": "atkins/t3-trix",
-  "type": "typo3-cms-framework",
+  "type": "typo3-cms-extension",
   "description": "A Trix Rich Text Editor Integration for TYPO3 CMS",
   "homepage": "https://github.com/colinatkins/t3-trix",
   "license": [
