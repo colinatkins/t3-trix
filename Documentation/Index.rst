@@ -1,14 +1,14 @@
 ..  include:: /Includes.rst.txt
 
-=========
+===============
 RTE Trix-Editor
-=========
+===============
 
 :Extension key:
     trix
 
 :Package name:
-    atkins
+    atkins/t3-trix
 
 :Version:
     |release|
