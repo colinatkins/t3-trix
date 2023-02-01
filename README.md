@@ -18,6 +18,3 @@ Run the following command to install Trix Editor for TYPO3:
 composer require atkins/t3-trix
 ```
 
-## Compatibility
-
-Compatible with the latest TYPO3 version 12.x. and PHP 7.4 - 8.1.
