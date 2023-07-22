@@ -50,11 +50,8 @@ class RichTextNodeResolver implements NodeResolverInterface
     public function resolve()
     {
         $parameterArray = $this->data['parameterArray'];
-        $backendUser = $this->getBackendUserAuthentication();
-        if (// If RTE is generally enabled by user settings and RTE object registry can return something valid
-            $backendUser->isRTE()
-            // If RTE is enabled for field
-            && (bool)($parameterArray['fieldConf']['config']['enableRichtext'] ?? false) === true
+        if (// If RTE is enabled for field
+            (bool)($parameterArray['fieldConf']['config']['enableRichtext'] ?? false) === true
             // If RTE config is found (prepared by TcaText data provider)
             && is_array($parameterArray['fieldConf']['config']['richtextConfiguration'] ?? null)
             // If RTE is not disabled on configuration level
