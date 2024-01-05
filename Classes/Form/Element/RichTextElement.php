@@ -208,8 +208,18 @@ class RichTextElement extends AbstractFormElement
         } else {
             $contentLanguage = $this->rteConfiguration['config']['defaultContentLanguage'] ?? 'en_US';
         }
-        $languageCodeParts = explode('_', $contentLanguage);
-        $contentLanguage = '_' . strtoupper($languageCodeParts[1]);
+
+        $languageCode = '';
+
+        if (str_contains($contentLanguage, '_')) {
+            $languageCodeParts = explode('_', $contentLanguage);
+            $languageCode = $languageCodeParts[1];
+        } else if(strlen($contentLanguage) == 2) {
+            $languageCode = $contentLanguage;
+        } else {
+            $contentLanguage = 'en';
+        }
+        $contentLanguage = '_' . strtoupper($languageCode);
         // Find the configured language in the list of localization locales
         $locales = GeneralUtility::makeInstance(Locales::class);
         // If not found, default to 'en'
