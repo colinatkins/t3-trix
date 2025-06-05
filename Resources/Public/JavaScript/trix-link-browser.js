@@ -42,6 +42,7 @@ class TrixLinkBrowser {
         return 'link' + capitalizedAttribute;
     }
     sanitizeLink(t, e) {
+        console.log(t, e)
         const i = t.match(/^([a-z0-9]+:\/\/[^:\/?#]+(?:\/?[^?#]*)?)(\??[^#]*)(#?.*)$/);
         if (i && i.length > 0) {
             t = i[1] + i[2];

@@ -22,6 +22,7 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use TYPO3\CMS\Backend\Form\Element\AbstractFormElement;
 use TYPO3\CMS\Backend\Form\NodeFactory;
 use TYPO3\CMS\Backend\Routing\UriBuilder;
+use TYPO3\CMS\Core\Core\Environment;
 use TYPO3\CMS\Core\Localization\Locales;
 use TYPO3\CMS\Core\Page\JavaScriptModuleInstruction;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
@@ -76,21 +77,11 @@ class RichTextElement extends AbstractFormElement
      */
     protected $rteConfiguration = [];
 
-    /**
-     * @var EventDispatcherInterface
-     */
-    protected $eventDispatcher;
-
-    /**
-     * Container objects give $nodeFactory down to other containers.
-     *
-     * @param EventDispatcherInterface|null $eventDispatcher
-     */
-    public function __construct(NodeFactory $nodeFactory, array $data, EventDispatcherInterface $eventDispatcher = null)
-    {
-        parent::__construct($nodeFactory, $data);
-        $this->eventDispatcher = $eventDispatcher ?? GeneralUtility::makeInstance(EventDispatcherInterface::class);
-    }
+    public function __construct(
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly UriBuilder $uriBuilder,
+        private readonly Locales $locales,
+    ) {}
 
     /**
      * Renders the ckeditor element
@@ -149,20 +140,20 @@ class RichTextElement extends AbstractFormElement
         $html[] =   $fieldInformationHtml;
         $html[] =   '<div class="form-control-wrap">';
         $html[] =       '<div class="form-wizards-wrap">';
-        $html[] =           '<div class="form-wizards-element" ' . $trixControllerAttributes . '>';
+        $html[] =           '<div class="form-wizards-item-element" ' . $trixControllerAttributes . '>';
         $html[] =               '<input ' . $hiddenTagAttributes . '>';
         $html[] =               '<trix-editor ' . $trixTagAttributes . '></trix-editor>';
         $html[] =           '</div>';
 
         if (!empty($fieldControlHtml)) {
-            $html[] =           '<div class="form-wizards-items-aside form-wizards-items-aside--field-control">';
+            $html[] =           '<div class="form-wizards-item-aside form-wizards-item-aside--field-control">';
             $html[] =               '<div class="btn-group">';
             $html[] =                   $fieldControlHtml;
             $html[] =               '</div>';
             $html[] =           '</div>';
         }
         if (!empty($fieldWizardHtml)) {
-            $html[] = '<div class="form-wizards-items-bottom">';
+            $html[] = '<div class="form-wizards-item-bottom">';
             $html[] = $fieldWizardHtml;
             $html[] = '</div>';
         }
@@ -171,7 +162,7 @@ class RichTextElement extends AbstractFormElement
         $html[] =   '</div>';
         $html[] = '</div>';
 
-        $resultArray['html'] = implode(LF, $html);
+        $resultArray['html'] = $this->wrapWithFieldsetAndLegend(implode(LF, $html));
         $resultArray['javaScriptModules'][] = JavaScriptModuleInstruction::create('@typo3/trix/trix.js');
         $resultArray['stylesheetFiles'][] = PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Contrib/trix.css');
         $resultArray['stylesheetFiles'][] = PathUtility::getPublicResourceWebPath('EXT:trix/Resources/Public/Css/editor.css');
@@ -203,43 +194,18 @@ class RichTextElement extends AbstractFormElement
         }
         $contentLanguageUid = (int)max($currentLanguageUid, 0);
         if ($contentLanguageUid) {
-            // the language rows might not be fully inialized, so we fallback to en_US in this case
-            $contentLanguage = $this->data['systemLanguageRows'][$currentLanguageUid]['iso'] ?? 'en_US';
+            // the language rows might not be fully initialized, so we fall back to en-US in this case
+            $contentLanguage = $this->data['systemLanguageRows'][$currentLanguageUid]['iso'] ?? 'en-US';
         } else {
-            $contentLanguage = $this->rteConfiguration['config']['defaultContentLanguage'] ?? 'en_US';
+            $contentLanguage = $this->rteConfiguration['config']['defaultContentLanguage'] ?? 'en-US';
         }
-
-        $languageCode = '';
-
-        if (str_contains($contentLanguage, '_')) {
-            $languageCodeParts = explode('_', $contentLanguage);
-            $languageCode = $languageCodeParts[1];
-        } else if(strlen($contentLanguage) == 2) {
-            $languageCode = $contentLanguage;
-        } else {
-            $contentLanguage = 'en';
-        }
-        $contentLanguage = '_' . strtoupper($languageCode);
-        // Find the configured language in the list of localization locales
-        $locales = GeneralUtility::makeInstance(Locales::class);
-        // If not found, default to 'en'
-        if (!in_array($contentLanguage, $locales->getLocales(), true)) {
+        $languageCodeParts = explode('_', $contentLanguage);
+        $contentLanguage = strtolower($languageCodeParts[0]) . (!empty($languageCodeParts[1]) ? '_' . strtoupper($languageCodeParts[1]) : '');
+        // Find the configured language in the list of localization locales, if not found, default to 'en'.
+        if ($contentLanguage === 'default' || !$this->locales->isValidLanguageKey($contentLanguage)) {
             $contentLanguage = 'en';
         }
         return $contentLanguage;
-    }
-
-    /**
-     * Determine the language direction
-     */
-    protected function getLanguageDirectionOfContent(): string
-    {
-        $currentLanguageUid = ($this->data['databaseRow']['sys_language_uid'] ?? 0);
-        if (is_array($currentLanguageUid)) {
-            $currentLanguageUid = $currentLanguageUid[0];
-        }
-        $contentLanguageUid = (int)max($currentLanguageUid, 0);
-        return $this->data['systemLanguageRows'][$contentLanguageUid]['direction'] ?? '';
     }
 
     /**

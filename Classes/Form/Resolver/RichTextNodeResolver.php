@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is derived from the official rte_ckeditor extension.
  * All rights belong to their respective owners.
@@ -16,10 +18,8 @@
 
 namespace Atkins\Trix\Form\Resolver;
 
-use TYPO3\CMS\Backend\Form\NodeFactory;
-use TYPO3\CMS\Backend\Form\NodeResolverInterface;
-use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use Atkins\Trix\Form\Element\RichTextElement;
+use TYPO3\CMS\Backend\Form\NodeResolverInterface;
 
 /**
  * This resolver will return the RichTextElement render class if RTE is enabled for this field.
@@ -27,17 +27,9 @@ use Atkins\Trix\Form\Element\RichTextElement;
  */
 class RichTextNodeResolver implements NodeResolverInterface
 {
-    /**
-     * Global options from NodeFactory
-     *
-     * @var array
-     */
-    protected $data;
+    protected array $data;
 
-    /**
-     * Default constructor receives full data array
-     */
-    public function __construct(NodeFactory $nodeFactory, array $data)
+    public function setData(array $data): void
     {
         $this->data = $data;
     }
@@ -47,7 +39,7 @@ class RichTextNodeResolver implements NodeResolverInterface
      *
      * @return string|null New class name or null if this resolver does not change current class name.
      */
-    public function resolve()
+    public function resolve(): ?string
     {
         $parameterArray = $this->data['parameterArray'];
         if (// If RTE is enabled for field
@@ -60,10 +52,5 @@ class RichTextNodeResolver implements NodeResolverInterface
             return RichTextElement::class;
         }
         return null;
-    }
-
-    protected function getBackendUserAuthentication(): BackendUserAuthentication
-    {
-        return $GLOBALS['BE_USER'];
     }
 }

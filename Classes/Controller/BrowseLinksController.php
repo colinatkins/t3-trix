@@ -21,12 +21,17 @@ namespace Atkins\Trix\Controller;
 
 
 use Psr\Http\Message\ServerRequestInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autoconfigure;
 use TYPO3\CMS\Backend\Controller\AbstractLinkBrowserController;
 use TYPO3\CMS\Core\Configuration\Richtext;
+use TYPO3\CMS\Core\LinkHandling\Exception\UnknownLinkHandlerException;
 use TYPO3\CMS\Core\LinkHandling\LinkService;
 use TYPO3\CMS\Core\Localization\LanguageService;
 use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
+use TYPO3\CMS\Core\Messaging\FlashMessage;
+use TYPO3\CMS\Core\Messaging\FlashMessageService;
 use TYPO3\CMS\Core\Page\JavaScriptModuleInstruction;
+use TYPO3\CMS\Core\Type\ContextualFeedbackSeverity;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Core\View\ViewInterface;
 
@@ -34,6 +39,7 @@ use TYPO3\CMS\Core\View\ViewInterface;
  * Extended controller for link browser
  * @internal This is a specific Backend Controller implementation and is not considered part of the Public TYPO3 API.
  */
+#[Autoconfigure(public: true, shared: false)]
 class BrowseLinksController extends AbstractLinkBrowserController
 {
     protected string $editorId;
@@ -49,15 +55,14 @@ class BrowseLinksController extends AbstractLinkBrowserController
     protected array $classesAnchorDefaultTarget = [];
     protected array $classesAnchorJSOptions = [];
     protected string $defaultLinkTarget = '';
-    protected array $additionalAttributes = [];
     protected string $siteUrl = '';
 
     public function __construct(
         protected readonly LinkService $linkService,
         protected readonly Richtext $richtext,
         protected readonly LanguageServiceFactory $languageServiceFactory,
-    ) {
-    }
+        protected readonly FlashMessageService $flashMessageService,
+    ) {}
 
     /**
      * This is only used by RTE currently.
@@ -70,7 +75,7 @@ class BrowseLinksController extends AbstractLinkBrowserController
     /**
      * @return array{act: string, P: array, editorId: string, contentsLanguage: string} Array of parameters which have to be added to URLs
      */
-    public function getUrlParameters(array $overrides = null): array
+    public function getUrlParameters(?array $overrides = null): array
     {
         return [
             'act' => $overrides['act'] ?? $this->displayedLinkHandlerId,
@@ -99,8 +104,8 @@ class BrowseLinksController extends AbstractLinkBrowserController
         $queryParameters = $request->getQueryParams();
         $this->siteUrl = $request->getAttribute('normalizedParams')->getSiteUrl();
         $this->currentLinkParts = $queryParameters['P']['curUrl'] ?? [];
-        $this->editorId = $queryParameters['editorId'];
-        $this->contentsLanguage = $queryParameters['contentsLanguage'];
+        $this->editorId = $queryParameters['editorId'] ?? '';
+        $this->contentsLanguage = $queryParameters['contentsLanguage'] ?? '';
         $this->contentLanguageService = $this->languageServiceFactory->create($this->contentsLanguage);
         $tcaFieldConf = [
             'enableRichtext' => true,
@@ -122,12 +127,18 @@ class BrowseLinksController extends AbstractLinkBrowserController
             return;
         }
         if (!empty($this->currentLinkParts['url'])) {
-            $data = $this->linkService->resolve($this->currentLinkParts['url']);
-            $this->currentLinkParts['type'] = $data['type'];
-            unset($data['type']);
-            $this->currentLinkParts['url'] = $data;
-            if (!empty($this->currentLinkParts['url']['parameters'])) {
-                $this->currentLinkParts['params'] = '&' . $this->currentLinkParts['url']['parameters'];
+            try {
+                $data = $this->linkService->resolve($this->currentLinkParts['url']);
+                $this->currentLinkParts['type'] = $data['type'];
+                unset($data['type']);
+                $this->currentLinkParts['url'] = $data;
+                if (!empty($this->currentLinkParts['url']['parameters'])) {
+                    $this->currentLinkParts['params'] = '&' . $this->currentLinkParts['url']['parameters'];
+                }
+            } catch (UnknownLinkHandlerException $e) {
+                $this->flashMessageService->getMessageQueueByIdentifier()->enqueue(
+                    new FlashMessage(message: $e->getMessage(), severity: ContextualFeedbackSeverity::ERROR)
+                );
             }
         }
         parent::initCurrentUrl();
@@ -146,7 +157,7 @@ class BrowseLinksController extends AbstractLinkBrowserController
             ];
 
             if (is_array($this->thisConfig['classesAnchor'] ?? null)) {
-                foreach ($this->thisConfig['classesAnchor'] as $label => $conf) {
+                foreach ($this->thisConfig['classesAnchor'] as $conf) {
                     if (in_array($conf['class'] ?? null, $classesAnchorArray, true)) {
                         $classesAnchor['all'][] = $conf['class'];
                         if ($conf['type'] === $this->displayedLinkHandlerId) {
@@ -161,20 +172,47 @@ class BrowseLinksController extends AbstractLinkBrowserController
                     }
                 }
             }
-            if (isset($this->linkAttributeValues['class'])
-                && isset($classesAnchor[$this->displayedLinkHandlerId])
-                && !in_array($this->linkAttributeValues['class'], $classesAnchor[$this->displayedLinkHandlerId], true)
-            ) {
-                unset($this->linkAttributeValues['class']);
+
+            $linkClass = $this->linkAttributeValues['class'] ?? '';
+            if ($linkClass !== '') {
+                $currentLinkClassIsAllowed = true;
+                if (!in_array($linkClass, $classesAnchorArray, true)) {
+                    // Current class is not a globally allowed class
+                    $currentLinkClassIsAllowed = false;
+                }
+                if (
+                    isset($classesAnchor[$this->displayedLinkHandlerId]) &&
+                    in_array($linkClass, $classesAnchor['all'], true) &&
+                    !in_array($linkClass, $classesAnchor[$this->displayedLinkHandlerId], true)
+                ) {
+                    // Current class is limited to specific link types but not available in current link type
+                    $currentLinkClassIsAllowed = false;
+                }
+
+                if (!$currentLinkClassIsAllowed) {
+                    $this->classesAnchorJSOptions[$this->displayedLinkHandlerId] ??= '';
+                    // Add a dummy option that preserved the current class value (despite being invalid)
+                    // in order to prevent unintentional modification of assigned classes.
+                    $this->classesAnchorJSOptions[$this->displayedLinkHandlerId] .= sprintf(
+                        '<option selected="selected" value="%s">%s</option>',
+                        htmlspecialchars($linkClass),
+                        htmlspecialchars(
+                            @sprintf(
+                                '[ ' . $this->getLanguageService()->sL('LLL:EXT:core/Resources/Private/Language/locallang_core.xlf:labels.noMatchingValue') . ' ]',
+                                $linkClass
+                            )
+                        )
+                    );
+                }
             }
+
             // Constructing the class selector options
             foreach ($classesAnchorArray as $class) {
                 if (
-                    !in_array($class, $classesAnchor['all'])
+                    !in_array($class, $classesAnchor['all'], true)
                     || (
-                        in_array($class, $classesAnchor['all'])
-                        && isset($classesAnchor[$this->displayedLinkHandlerId])
-                        && is_array($classesAnchor[$this->displayedLinkHandlerId])
+                        in_array($class, $classesAnchor['all'], true)
+                        && is_array($classesAnchor[$this->displayedLinkHandlerId] ?? null)
                         && in_array($class, $classesAnchor[$this->displayedLinkHandlerId])
                     )
                 ) {
@@ -313,23 +351,18 @@ class BrowseLinksController extends AbstractLinkBrowserController
         $currentRel = '';
         if ($this->displayedLinkHandler === $this->currentLinkHandler
             && !empty($this->currentLinkParts)
-            && isset($this->linkAttributeValues['rel'])
-            && is_string($this->linkAttributeValues['rel'])
+            && is_string($this->linkAttributeValues['rel'] ?? null)
         ) {
             $currentRel = $this->linkAttributeValues['rel'];
         }
 
         return '
-            <form action="" name="lrelform" id="lrelform" class="t3js-dummyform">
-                 <div class="row mb-3">
-                    <label class="col-sm-3 col-form-label">' .
-            htmlspecialchars($this->getLanguageService()->getLL('linkRelationship')) .
-            '</label>
-                    <div class="col-sm-9">
-                        <input type="text" name="lrel" class="form-control" value="' . htmlspecialchars($currentRel) . '" />
-                    </div>
-                </div>
-            </form>
+            <div class="element-browser-form-group">
+                <label for="lrel" class="form-label">' .
+                    htmlspecialchars($this->getLanguageService()->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:linkRelationship')) .
+                '</label>
+                <input type="text" name="lrel" class="form-control" value="' . htmlspecialchars($currentRel) . '" />
+            </div>
             ';
     }
 
@@ -341,51 +374,27 @@ class BrowseLinksController extends AbstractLinkBrowserController
         }
         $target = !empty($this->linkAttributeValues['target']) ? $this->linkAttributeValues['target'] : $this->defaultLinkTarget;
         $lang = $this->getLanguageService();
-        $targetSelector = '';
 
         $disabled = $targetSelectorConfig['disabled'] ?? false;
-        if (!$disabled) {
-            $targetSelector = '
-						<select name="ltarget_type" class="t3js-targetPreselect form-select">
-							<option value=""></option>
-							<option value="_top">' . htmlspecialchars($lang->getLL('top')) . '</option>
-							<option value="_blank">' . htmlspecialchars($lang->getLL('newWindow')) . '</option>
-						</select>
-			';
+        if ($disabled) {
+            return '';
         }
 
         return '
-				<form action="" name="ltargetform" id="ltargetform" class="t3js-dummyform">
-                    <div class="row mb-3" ' . ($disabled ? ' style="display: none;"' : '') . '>
-                        <label class="col-sm-3 col-form-label">' . htmlspecialchars($lang->getLL('target')) . '</label>
-						<div class="col-sm-4">
-							<input type="text" name="ltarget" class="t3js-linkTarget form-control"
-							    value="' . htmlspecialchars($target) . '" />
-						</div>
-						<div class="col-sm-5">
-							' . $targetSelector . '
-						</div>
-					</div>
-				</form>
-				';
-    }
-
-    protected function getTitleField(): string
-    {
-        $title = $this->linkAttributeValues['title'] ?? '';
-
-        return '
-                <form action="" name="ltitleform" id="ltitleform" class="t3js-dummyform">
-                    <div class="row mb-3">
-                        <label class="col-sm-3 col-form-label">
-                            ' . htmlspecialchars($this->getLanguageService()->getLL('title')) . '
-                        </label>
-                        <div class="col-sm-9">
-                            <input type="text" name="ltitle" class="form-control" value="' . htmlspecialchars($title) . '">
-                        </div>
-                    </div>
-                </form>
-                ';
+            <div class="element-browser-form-group">
+                <label for="ltarget" class="form-label">
+                    ' . htmlspecialchars($lang->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:target')) . '
+                </label>
+                <span class="input-group">
+                    <input id="ltarget" type="text" name="ltarget" class="t3js-linkTarget form-control"
+                        value="' . htmlspecialchars($target) . '" />
+                    <select name="ltarget_type" class="t3js-targetPreselect form-select">
+                        <option value=""></option>
+                        <option value="_top">' . htmlspecialchars($lang->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:top')) . '</option>
+                        <option value="_blank">' . htmlspecialchars($lang->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:newWindow')) . '</option>
+                    </select>
+                </span>
+            </div>';
     }
 
     /**
@@ -395,24 +404,34 @@ class BrowseLinksController extends AbstractLinkBrowserController
      */
     protected function getClassField(): string
     {
-        $selectClass = '';
-        if (isset($this->classesAnchorJSOptions[$this->displayedLinkHandlerId])) {
-            $selectClass = '
-                <form action="" name="lclassform" id="lclassform" class="t3js-dummyform">
-                    <div class="row mb-3">
-                        <label class="col-sm-3 col-form-label">
-                            ' . htmlspecialchars($this->getLanguageService()->getLL('class')) . '
-                        </label>
-                        <div class="col-sm-9">
-                            <select name="lclass" class="t3js-class-selector form-select">
-                                ' . $this->classesAnchorJSOptions[$this->displayedLinkHandlerId] . '
-                            </select>
-                        </div>
-                    </div>
-                </form>
-            ';
+        if (!isset($this->classesAnchorJSOptions[$this->displayedLinkHandlerId])) {
+            return '';
         }
-        return $selectClass;
+
+        return '
+            <div class="element-browser-form-group">
+                <label for="lclass" class="form-label">
+                    ' . htmlspecialchars($this->getLanguageService()->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:class')) . '
+                </label>
+                <select id="lclass" name="lclass" class="t3js-class-selector form-select">
+                    ' . $this->classesAnchorJSOptions[$this->displayedLinkHandlerId] . '
+                </select>
+            </div>
+        ';
+    }
+
+    protected function getTitleField(): string
+    {
+        $title = $this->linkAttributeValues['title'] ?? '';
+
+        return '
+            <div class="element-browser-form-group">
+                <label for="ltitle" class="form-label">' .
+                    htmlspecialchars($this->getLanguageService()->sL('LLL:EXT:backend/Resources/Private/Language/locallang_browse_links.xlf:title')) .
+                '</label>
+                <input type="text" name="ltitle" class="form-control" value="' . htmlspecialchars($title) . '" />
+            </div>
+        ';
     }
 
     /**
