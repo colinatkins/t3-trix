@@ -8,14 +8,14 @@ $EM_CONF[$_EXTKEY] = [
     'author' => 'Colin Atkins',
     'author_email' => 'atkins@hey.com',
     'uploadfolder' => '0',
-    'version' => '13.4.1',
+    'version' => '14.0.0',
     'constraints' => [
         'depends' => [
-            'typo3' => '13.0.0-13.99.999',
+            'typo3' => '14.0.0-14.99.999',
         ],
         'conflicts' => [],
         'suggests' => [
-            'setup' => '13.0.0-13.99.999',
+            'setup' => '14.0.0-14.99.999',
         ],
     ],
 ];
